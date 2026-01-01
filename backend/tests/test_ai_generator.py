@@ -273,7 +273,7 @@ class TestAIGeneratorErrorHandling:
         assert "API Error" in str(exc_info.value)
 
     def test_tool_execution_error_handling(self, ai_generator, mock_anthropic_client):
-        """Test handling when tool execution fails"""
+        """Test handling when tool execution fails - error is caught and passed to AI"""
         mock_tool_manager = Mock()
         mock_tool_manager.execute_tool.side_effect = Exception("Tool execution failed")
 
@@ -289,16 +289,21 @@ class TestAIGeneratorErrorHandling:
             stop_reason="tool_use"
         )
 
-        mock_anthropic_client.messages.create.return_value = tool_use_response
+        # Final response after tool error is passed back
+        final_response = MockResponse(
+            content=[MockContentBlock("text", text="I encountered an error while searching.")]
+        )
 
-        with pytest.raises(Exception) as exc_info:
-            ai_generator.generate_response(
-                query="test",
-                tools=[{"name": "search_course_content"}],
-                tool_manager=mock_tool_manager
-            )
+        mock_anthropic_client.messages.create.side_effect = [tool_use_response, final_response]
 
-        assert "Tool execution failed" in str(exc_info.value)
+        result = ai_generator.generate_response(
+            query="test",
+            tools=[{"name": "search_course_content"}],
+            tool_manager=mock_tool_manager
+        )
+
+        # Tool error should be caught and AI should still respond
+        assert result == "I encountered an error while searching."
 
 
 if __name__ == "__main__":

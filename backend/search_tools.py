@@ -1,3 +1,4 @@
+import json
 from typing import Dict, Any, Optional, Protocol
 from abc import ABC, abstractmethod
 from vector_store import VectorStore, SearchResults
@@ -153,8 +154,6 @@ class CourseOutlineTool(Tool):
         Returns:
             Formatted course outline or error message
         """
-        import json
-
         # Use vector search to find best matching course
         try:
             results = self.store.course_catalog.query(
@@ -191,8 +190,10 @@ class CourseOutlineTool(Tool):
 
             return "\n".join(output_lines)
 
-        except Exception as e:
-            return f"Error retrieving course outline: {str(e)}"
+        except (KeyError, IndexError):
+            return f"No course found matching '{course_name}'"
+        except json.JSONDecodeError:
+            return f"Error parsing course data for '{course_name}'"
 
 
 class ToolManager:
