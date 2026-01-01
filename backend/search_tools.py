@@ -1,3 +1,4 @@
+import json
 from typing import Dict, Any, Optional, Protocol
 from abc import ABC, abstractmethod
 from vector_store import VectorStore, SearchResults
@@ -100,10 +101,17 @@ class CourseSearchTool(Tool):
                 header += f" - Lesson {lesson_num}"
             header += "]"
             
-            # Track source for the UI
-            source = course_title
+            # Track source for the UI with clickable link if available
+            source_text = course_title
             if lesson_num is not None:
-                source += f" - Lesson {lesson_num}"
+                source_text += f" - Lesson {lesson_num}"
+                lesson_link = self.store.get_lesson_link(course_title, lesson_num)
+                if lesson_link:
+                    source = f'<a href="{lesson_link}" target="_blank">{source_text}</a>'
+                else:
+                    source = source_text
+            else:
+                source = source_text
             sources.append(source)
             
             formatted.append(f"{header}\n{doc}")
@@ -112,6 +120,81 @@ class CourseSearchTool(Tool):
         self.last_sources = sources
         
         return "\n\n".join(formatted)
+
+class CourseOutlineTool(Tool):
+    """Tool for retrieving course outline including title, link, and lesson list"""
+
+    def __init__(self, vector_store: VectorStore):
+        self.store = vector_store
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        """Return Anthropic tool definition for this tool"""
+        return {
+            "name": "get_course_outline",
+            "description": "Get the complete outline of a course including title, course link, and all lessons with their numbers and titles. Use this for questions about course structure, lesson lists, or what topics a course covers.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "course_name": {
+                        "type": "string",
+                        "description": "Course title to look up (partial matches work, e.g. 'MCP', 'Introduction')"
+                    }
+                },
+                "required": ["course_name"]
+            }
+        }
+
+    def execute(self, course_name: str) -> str:
+        """
+        Execute the outline tool to get course structure.
+
+        Args:
+            course_name: Course name/title to look up
+
+        Returns:
+            Formatted course outline or error message
+        """
+        # Use vector search to find best matching course
+        try:
+            results = self.store.course_catalog.query(
+                query_texts=[course_name],
+                n_results=1
+            )
+
+            if not results['documents'][0] or not results['metadatas'][0]:
+                return f"No course found matching '{course_name}'"
+
+            metadata = results['metadatas'][0][0]
+            course_title = metadata.get('title', 'Unknown')
+            course_link = metadata.get('course_link', 'No link available')
+            lessons_json = metadata.get('lessons_json', '[]')
+
+            # Parse lessons
+            lessons = json.loads(lessons_json)
+
+            # Format the output
+            output_lines = [
+                f"Course Title: {course_title}",
+                f"Course Link: {course_link}",
+                "",
+                "Lessons:"
+            ]
+
+            for lesson in lessons:
+                lesson_num = lesson.get('lesson_number', '?')
+                lesson_title = lesson.get('lesson_title', 'Untitled')
+                output_lines.append(f"  Lesson {lesson_num}: {lesson_title}")
+
+            if not lessons:
+                output_lines.append("  No lessons found for this course.")
+
+            return "\n".join(output_lines)
+
+        except (KeyError, IndexError):
+            return f"No course found matching '{course_name}'"
+        except json.JSONDecodeError:
+            return f"Error parsing course data for '{course_name}'"
+
 
 class ToolManager:
     """Manages available tools for the AI"""
